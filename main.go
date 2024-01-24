@@ -3,16 +3,25 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"text/template"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
-	"github.com/tmc/langchaingo/llms"
-	"github.com/tmc/langchaingo/llms/ollama"
+	"github.com/tmc/langchaingo/llms/local"
+)
+
+var (
+	wd          string
+	bin         string
+	model       string
+	gpuLayers   string
+	threads     string
+	contextSize string
 )
 
 // initialise to load environment variable from .env file
@@ -21,6 +30,15 @@ func init() {
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
+	wd, err = os.Getwd()
+	if err != nil {
+		log.Fatal("Error getting current directory")
+	}
+	bin = os.Getenv("LOCAL_LLM_BIN")
+	model = os.Getenv("LOCAL_LLM_MODEL")
+	gpuLayers = os.Getenv("LOCAL_LLM_NUM_GPU_LAYERS")
+	threads = os.Getenv("LOCAL_LLM_NUM_CPU_CORES")
+	contextSize = os.Getenv("LOCAL_LLM_CONTEXT")
 }
 
 func main() {
@@ -30,11 +48,10 @@ func main() {
 		http.FileServer(http.Dir("./static"))))
 	r.Get("/", index)
 	r.Post("/run", run)
-	log.Println("\033[93mMonsoon started. Press CTRL+C to quit.\033[0m")
+	fmt.Printf("Monsoon started on port %s. Press CTRL+C to quit.\n", os.Getenv("PORT"))
 	http.ListenAndServe(":"+os.Getenv("PORT"), r)
 }
 
-// index
 func index(w http.ResponseWriter, r *http.Request) {
 	t, _ := template.ParseFiles("static/index.html")
 	t.Execute(w, nil)
@@ -51,20 +68,29 @@ func run(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// create the LLM
+	bin := fmt.Sprintf("%s/%s", wd, bin)
+	args := fmt.Sprintf("-m %s/%s -t %s -c %s -ngl %s -p", wd, model, threads, contextSize, gpuLayers)
 
-	llm, err := ollama.New(ollama.WithModel("llama2"))
+	llm, err := local.New(local.WithBin(bin), local.WithArgs(args))
 	if err != nil {
 		log.Println("Cannot create local LLM:", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Add("mime-type", "text/event-stream")
-	f := w.(http.Flusher)
-	llm.Call(context.Background(), prompt.Input,
-		llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-			w.Write(chunk)
-			f.Flush()
-			return nil
-		}), llms.WithMaxTokens(4096), llms.WithTemperature(0.5))
+	completion, err := llm.Call(context.Background(), prompt.Input)
+	if err != nil {
+		log.Println("Cannot get completion:", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	response := struct {
+		Input    string `json:"input"`
+		Response string `json:response"`
+	}{
+		Input:    prompt.Input,
+		Response: completion,
+	}
+	json.NewEncoder(w).Encode(response)
 }

@@ -1,4 +1,4 @@
 .DS_Store
-*.bin
+local/
+main.log
 monsoon
-run-llama

@@ -1,6 +1,6 @@
 <img src="static/logo.png" alt="logo" width="150px"/>
 
-Monsoon is a simple ChatGPT clone built with Go. It uses Llama-compatible LLMs, through ollama.
+Monsoon is a simple ChatGPT clone built with Go. It uses Llama-compatible LLMs, through llama.cpp.
 
 Here are some screenshots.
 
